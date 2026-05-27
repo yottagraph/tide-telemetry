@@ -1,0 +1,22 @@
+# Tide Telemetry — aggregate_signals
+#
+# Synthesises ~1000 maritime activity events deterministically from a
+# per-run UUID, aggregates by category, and writes one row per category
+# into the per-tenant Cloud SQL Postgres (`tide_aggregates` table).
+#
+# Trigger path is "Run now from the Portal" — no schedule. See
+# `.agents/skills/aether/compute.md` for the manifest schema.
+
+name: aggregate-signals
+runner: cloud_run
+cpu: '1'
+memory: '512Mi'
+max_retries: 1
+task_timeout: '10m'
+parallelism: 1
+task_count: 1
+
+env:
+    # SMOKE_RUN_ID is optional; main.py generates a UUID if missing so
+    # ad-hoc "Run now" invocations work without extra arguments.
+    SMOKE_RUN_ID: ''
