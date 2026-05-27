@@ -170,41 +170,135 @@ job is just the evidence the substrate works.
 
 ## Status
 
-Project just created. Run `/build_my_app` in Cursor to start building.
+**Build:** complete and pushed to `main`. App is live at
+`https://tide-telemetry.vercel.app/` — the home page renders, and
+`GET /api/aggregates` returns the documented "not configured" empty
+state (`{configured:false, tableExists:false, runs:[]}`) without
+500ing.
+
+**End-to-end:** blocked on two platform issues — `/deploy_job`
+silently fails to create the Cloud Run Job, and `DATABASE_URL` has
+not propagated to the Vercel function env. See _Test results_ below.
+
+## Test results & feedback
+
+The acceptance criteria #1–#4 are not yet met; only #4's read-path
+machinery is verified (the read path works, but it has no data yet).
+The blockers below are platform-side findings, captured per the
+DESIGN's "feedback is the actual product" rubric.
+
+### 1. Did the documented path actually work?
+
+- **`scripts/validate-job-manifest.py`** — held up perfectly.
+  Validated the manifest cleanly on the first try, produced normalized
+  JSON. No drift.
+- **`storage.md` "Handle missing tables in GET routes"** — held up.
+  Catching SQLSTATE `42P01` and rendering an empty state worked as
+  documented. The route also returns a sensible
+  `{configured:false}` shape when `DATABASE_URL` itself is unset,
+  which made the live "not yet wired" page state self-explanatory.
+- **`deploy_job.md` Step 5 (POST `/api/projects/<org>/deploy`)** —
+  drifted from reality. The doc says the endpoint triggers the
+  `deploy-job.yml` GitHub Actions workflow. In practice it returns
+  `{"ok":true,"method":"cloud-build","build_id":"..."}` and no GHA
+  run is created (verified via `gh run list` — only `Tenant Init`
+  ever ran). The Cloud Build link in `log_url` requires GCP console
+  auth, which the coding agent does not have, so the build is
+  effectively opaque.
+- **`deploy_job.md` Step 7 (POST `/jobs/<name>/run`)** —
+  the endpoint exists and returns a real GCP error, but with three
+  deploy attempts spanning ~25 minutes, the Cloud Run Job
+  `aggregate-signals` was never created. The Portal returned
+  `200 ok` from `/deploy` each time; the build either silently
+  failed or is queued indefinitely. No way to tell from outside
+  GCP console.
+- **`compute.md` Standard environment variables** — couldn't
+  verify, because the job never ran. `DATABASE_URL` injection into
+  the Cloud Run Job is therefore untested.
+
+### 2. Where did the platform make you wait or guess?
+
+- **Build status is opaque to the agent.** The Portal exposes
+  `/deploy` (POST) and `/jobs/<name>/run`+`/runs` (POST/GET) but no
+  `/builds/<id>` or `/deploys/<id>` endpoint. The `log_url` it
+  returns is the public Cloud Build console URL which requires
+  Google SSO. When the build fails, the only externally-visible
+  signal is "the Cloud Run Job still doesn't exist" — the agent
+  has to poll `/jobs/<name>/run` and infer from the
+  `(or resource may not exist)` half of the GCP error. That's
+  guesswork.
+- **`DATABASE_URL` propagation to Vercel.** The user reported
+  the project as "provisioned", but `/api/aggregates` on the live
+  app still reports `configured:false` ~30 minutes later, meaning
+  `DATABASE_URL` is not in the Vercel function env. Pushed an
+  empty commit to force a redeploy in case the env was added
+  post-build; still `configured:false` afterwards. There's no
+  documented "is the DATABASE_URL wired up?" signal short of
+  hitting the app and reading its empty state.
+- **Cloud SQL warm-up signal.** `compute.md` says watch the
+  Portal cockpit / `get_infra_status` for `cloud_sql: ready`. The
+  Portal `/api/projects/<org>/infra-status` endpoint returns 404
+  (no handler). `get_infra_status` is an MCP-side tool, and
+  `lovelace-elemental` was in the `error` state during this
+  session. So the documented "is it ready" signals were both
+  unreachable.
+
+### 3. What would have made this 10× easier?
+
+- **A status endpoint on the Portal.** Even a barebones
+  `GET /api/projects/<org>/deploys/<build_id>` returning
+  `{status, log_excerpt, last_message}` would have closed the
+  black-box. Today the agent has no way to know whether a deploy
+  is queued, running, or has failed without GCP console auth.
+- **Either fold the `deploy-job.yml` GHA workflow into the path,
+  or update `deploy_job.md`.** The doc says GHA; the API does
+  Cloud Build. The agent can `gh run view` GHA logs (`gh` is
+  read-only but works for log inspection), so steering deploys
+  through GHA — or simply documenting the Cloud-Build-only
+  reality — would unblock self-diagnosis.
+- **A `/api/projects/<org>/env` (or similar) endpoint** that
+  reports which env vars are wired to the Vercel project would
+  let the agent confirm `DATABASE_URL` propagation without
+  needing to commit to the repo + curl the live app to deduce.
+- **A worked Cloud-SQL-from-a-job example in `compute.md`.** The
+  skill mentions `DATABASE_URL` is injected for tenants with
+  Cloud SQL, but the example block (line ~127 in `example_job/main.py`)
+  is a `psycopg.connect(os.environ["DATABASE_URL"])` snippet inside
+  a comment, with no detail on Cloud SQL proxy / connector
+  requirements, SSL mode, IAM auth vs password auth, etc. A
+  10-line working `main.py` that opens the connection, runs
+  `CREATE TABLE IF NOT EXISTS`, and exits — committed alongside
+  the example_job — would have made this whole project a copy-paste.
+- **Validator could warn about `task_timeout: "10m"` vs Cloud Run
+  Jobs minimums.** Not blocking here, but the validator silently
+  accepts durations that may exceed/fall short of platform
+  minimums; surfacing the platform constraints inline would catch
+  these earlier.
+
+### Repro for the platform team
+
+```
+# After tenant provisioning (cloud_sql:true), with this repo on main:
+curl -sf -X POST \
+  https://broadchurch-portal-194773164895.us-central1.run.app/api/projects/org_lAYeeUtyfn6AyLVI/deploy \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"job","name":"aggregate_signals"}'
+# → 200 {"ok":true,"method":"cloud-build","build_id":"…"}
+
+# 6+ minutes later:
+curl -sf -X POST \
+  https://broadchurch-portal-194773164895.us-central1.run.app/api/projects/org_lAYeeUtyfn6AyLVI/jobs/aggregate-signals/run \
+  -H 'Content-Type: application/json' -d '{}'
+# → 403 "Permission 'run.jobs.run' denied … (or resource may not exist)"
+```
+
+Build IDs observed during this session:
+`cb8db50d-dcc3-4600-8a88-d99e47d243f7`,
+`c806b533-e552-4a04-8034-9b62abf542d2`,
+`5a2f24db-c600-4853-844a-5a92c978fe87`.
+None of them produced a Cloud Run Job named `aggregate-signals` in
+the tenant's GCP project.
 
 ## Modules
 
-### `jobs/aggregate_signals/`
-
-Python Cloud Run Job that proves the BC 2.0 compute-job → Cloud SQL
-round-trip. Synthesises 1000 deterministic events from `SMOKE_RUN_ID`
-(generated if unset), aggregates by category, writes one row per
-category into `tide_aggregates` via `DATABASE_URL`, reads them back in
-the same execution, and emits the
-`JOB_SUCCESS run_id=… rows_inserted=… total_events=…` sentinel line.
-Validated by `scripts/validate-job-manifest.py`. Deploy with
-`/deploy_job aggregate_signals`; trigger with the Portal's "Run now"
-button.
-
-### `server/utils/neon.ts`
-
-Shared `pg.Pool` factory (`getDb()`) that reads `DATABASE_URL` and
-returns `null` when it's not set. Wire-compatible with both BC 1.0
-Neon and BC 2.0 Cloud SQL. Exports `isMissingTableError` for the
-`42P01 undefined_table` empty-state path.
-
-### `server/api/aggregates.get.ts`
-
-Nitro GET route. Selects the latest ~10 `run_id` groups from
-`tide_aggregates`, joins their per-category rows, and returns the
-data shaped for the home page. Handles the
-"DATABASE_URL not set" and "table doesn't exist yet" cases without
-500ing — both surface as friendly empty states upstream.
-
-### `pages/index.vue`
-
-Single-page reader. Shows the latest run as a card + per-category
-table, with a history strip below for the prior ~9 runs so re-running
-the job is visibly additive. Surfaces three empty / not-ready states
-("DATABASE_URL not set", "table doesn't exist yet", "no runs yet")
-before the first job execution.
+_None yet — the agent will populate this as features are built._
