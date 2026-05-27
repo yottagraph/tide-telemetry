@@ -1,0 +1,37 @@
+# Broadchurch project configuration
+# Auto-generated during tenant provisioning.
+
+gcp:
+  project: broadchurch
+  region: us-central1
+  staging_bucket: broadchurch-agent-staging
+  github_deploy_sa: github-deploy@broadchurch.iam.gserviceaccount.com
+
+tenant:
+  project_name: "tide-telemetry"
+  display_name: "Tide Telemetry"
+  org_id: "org_lAYeeUtyfn6AyLVI"
+  service_account: "tenant-layeeutyfn6aylvi@broadchurch.iam.gserviceaccount.com"
+
+gateway:
+  url: "https://broadchurch-portal-194773164895.us-central1.run.app"
+  qs_api_key: "1274cc19ef3e44b4a8da795999e9e422513523764b2e278cff2461998ceca63f"
+
+query_server:
+  url: "https://query.pip.prod.g.lovelace.ai"
+  audience: ""
+
+auth:
+  client_id: "XpMXnmYFDaa87NvuGU1ZBrHAcstnq0L7"
+  audience: ""
+
+aether:
+  data_mode: "api-mcp"
+
+agents: {}
+
+# Compute jobs (Cloud Run Jobs) registered with the Portal.
+jobs: {}
+
+# Cloud Workflows registered with the Portal.
+workflows: {}
