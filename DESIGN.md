@@ -174,4 +174,37 @@ Project just created. Run `/build_my_app` in Cursor to start building.
 
 ## Modules
 
-_None yet — the agent will populate this as features are built._
+### `jobs/aggregate_signals/`
+
+Python Cloud Run Job that proves the BC 2.0 compute-job → Cloud SQL
+round-trip. Synthesises 1000 deterministic events from `SMOKE_RUN_ID`
+(generated if unset), aggregates by category, writes one row per
+category into `tide_aggregates` via `DATABASE_URL`, reads them back in
+the same execution, and emits the
+`JOB_SUCCESS run_id=… rows_inserted=… total_events=…` sentinel line.
+Validated by `scripts/validate-job-manifest.py`. Deploy with
+`/deploy_job aggregate_signals`; trigger with the Portal's "Run now"
+button.
+
+### `server/utils/neon.ts`
+
+Shared `pg.Pool` factory (`getDb()`) that reads `DATABASE_URL` and
+returns `null` when it's not set. Wire-compatible with both BC 1.0
+Neon and BC 2.0 Cloud SQL. Exports `isMissingTableError` for the
+`42P01 undefined_table` empty-state path.
+
+### `server/api/aggregates.get.ts`
+
+Nitro GET route. Selects the latest ~10 `run_id` groups from
+`tide_aggregates`, joins their per-category rows, and returns the
+data shaped for the home page. Handles the
+"DATABASE_URL not set" and "table doesn't exist yet" cases without
+500ing — both surface as friendly empty states upstream.
+
+### `pages/index.vue`
+
+Single-page reader. Shows the latest run as a card + per-category
+table, with a history strip below for the prior ~9 runs so re-running
+the job is visibly additive. Surfaces three empty / not-ready states
+("DATABASE_URL not set", "table doesn't exist yet", "no runs yet")
+before the first job execution.
