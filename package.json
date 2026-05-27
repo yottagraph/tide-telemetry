@@ -25,6 +25,7 @@
     "dependencies": {
         "@hapi/iron": "^7.0.1",
         "@tanstack/vue-virtual": "^3.13.8",
+        "@types/pg": "^8.20.0",
         "@upstash/redis": "^1.37.0",
         "@yottagraph-app/elemental-api": "^1.1.7",
         "chroma-js": "^3.1.2",
@@ -38,6 +39,7 @@
         "jose": "^5.9.6",
         "localforage": "^1.10.0",
         "mitt": "^3.0.1",
+        "pg": "^8.21.0",
         "prettier": "^3.5.3",
         "vuetify": "^3.8.5"
     },
